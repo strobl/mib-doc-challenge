@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from .models import PredictionRow, RowValidationError
+from .models import PredictionRow
 from .pipeline import CaseProcessor
 from .writer import CanonicalJsonlWriter
 

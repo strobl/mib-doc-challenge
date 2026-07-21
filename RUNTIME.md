@@ -21,8 +21,8 @@ docker build -t mib-submission:wo-1 .
 
 The image uses an exact Python patch release. Runtime Python dependencies are
 listed in `requirements.lock` and installed during the image build with hash
-checking enabled. The scaffold currently needs only the Python standard library,
-so the lock file contains no packages. Runtime installation or downloads are not
+checking enabled. Linux x86_64 and ARM64 wheel hashes are pinned for the PDFium,
+Pillow, and NumPy rendering stack. Runtime installation or downloads are not
 used.
 
 ## Run with the scoring constraints

@@ -12,7 +12,13 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from mib_pipeline import BatchRunner, SafeFallbackProcessor, discover_case_pdfs
+from mib_pipeline import (
+    BatchRunner,
+    DocumentRenderer,
+    RenderFirstFallbackProcessor,
+    SafeFallbackProcessor,
+    discover_case_pdfs,
+)
 
 
 USAGE = "usage: solution.py <input_pdf_dir> <output_predictions_path>"
@@ -77,7 +83,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         input_dir, output_path = parse_paths(arguments)
         runner = BatchRunner(
-            SafeFallbackProcessor(),
+            RenderFirstFallbackProcessor(
+                renderer=DocumentRenderer(),
+                fallback=SafeFallbackProcessor(),
+            ),
             max_workers=configured_worker_limit(),
         )
         report = runner.run(input_dir, output_path)

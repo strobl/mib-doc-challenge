@@ -9,7 +9,7 @@ from typing import Any, Mapping, Protocol
 from .models import PredictionRow
 
 
-class DocumentRenderer(Protocol):
+class RendererStage(Protocol):
     def render(self, pdf_path: Path) -> Any:
         """Render one source PDF into visible page data."""
 
@@ -38,7 +38,7 @@ class CaseProcessor(Protocol):
 class ProcessingPipeline:
     """Composition seam for the four downstream processing stages."""
 
-    renderer: DocumentRenderer
+    renderer: RendererStage
     extractor: EvidenceExtractor
     resolver: EvidenceResolver
     adjudicator: Adjudicator
@@ -73,3 +73,15 @@ class SafeFallbackProcessor:
             "adjudication": "NEEDS_REVIEW",
             "confidence": 0.0,
         }
+
+
+@dataclass
+class RenderFirstFallbackProcessor:
+    """Exercise ingestion before conservative downstream stages exist."""
+
+    renderer: RendererStage
+    fallback: SafeFallbackProcessor
+
+    def process_case(self, pdf_path: Path) -> Mapping[str, Any]:
+        self.renderer.render(pdf_path)
+        return self.fallback.process_case(pdf_path)
