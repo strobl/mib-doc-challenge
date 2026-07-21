@@ -23,6 +23,14 @@ from .extraction import (
     group_ocr_lines,
 )
 from .models import FIELD_NAMES, PredictionRow, RowValidationError
+from .adjudication import (
+    AdjudicationEngine,
+    AdjudicationOutcome,
+    DecisionTrace,
+    GeneralizablePolicyExceptionStore,
+    PolicyException,
+    PolicyRuleSet,
+)
 from .resolution import (
     CaseLinker,
     EvidencePrecedenceHierarchy,
@@ -34,6 +42,7 @@ from .resolution import (
     ResolvedField,
 )
 from .pipeline import (
+    AdjudicatingCaseProcessor,
     ExtractThenFallbackProcessor,
     ProcessingPipeline,
     RenderFirstFallbackProcessor,
@@ -43,12 +52,16 @@ from .pipeline import (
 from .writer import CanonicalJsonlWriter, DuplicateCaseIdError
 
 __all__ = [
+    "AdjudicatingCaseProcessor",
+    "AdjudicationEngine",
+    "AdjudicationOutcome",
     "BatchRunReport",
     "BatchRunner",
     "CanonicalJsonlWriter",
     "CandidateEvidence",
     "CaseLinker",
     "DuplicateCaseIdError",
+    "DecisionTrace",
     "DocumentRenderer",
     "EvidenceType",
     "EvidencePrecedenceHierarchy",
@@ -57,6 +70,9 @@ __all__ = [
     "FIELD_NAMES",
     "FieldState",
     "LinkedCase",
+    "GeneralizablePolicyExceptionStore",
+    "PolicyException",
+    "PolicyRuleSet",
     "PredictionRow",
     "ProcessingPipeline",
     "RecoverableRenderError",

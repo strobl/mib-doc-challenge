@@ -117,3 +117,21 @@ class ResolveThenFallbackProcessor:
         linked_case = self.linker.link(rendered.case_id, candidates)
         self.resolver.resolve(linked_case)
         return self.fallback.process_case(pdf_path)
+
+
+@dataclass
+class AdjudicatingCaseProcessor:
+    """Run the complete visible-evidence path through deterministic policy."""
+
+    renderer: RendererStage
+    extractor: EvidenceExtractor
+    linker: Any
+    resolver: EvidenceResolver
+    adjudicator: Adjudicator
+
+    def process_case(self, pdf_path: Path) -> PredictionRow | Mapping[str, Any] | None:
+        rendered = self.renderer.render(pdf_path)
+        candidates = self.extractor.extract(rendered)
+        linked_case = self.linker.link(rendered.case_id, candidates)
+        resolved_case = self.resolver.resolve(linked_case)
+        return self.adjudicator.adjudicate(resolved_case)

@@ -10,7 +10,18 @@ from .extraction import CandidateEvidence, EvidenceType
 from .models import CASE_ID_PATTERN, FIELD_NAMES
 
 
-RESOLVABLE_FIELDS = tuple(field for field in FIELD_NAMES if field != "confidence")
+POLICY_ONLY_FIELDS = (
+    "stay_duration_days",
+    "packet_receipt_date",
+    "biohazard_check",
+    "hardship_waiver",
+    "diplomatic_note",
+    "work_permit_requested",
+)
+RESOLVABLE_FIELDS = (
+    tuple(field for field in FIELD_NAMES if field != "confidence")
+    + POLICY_ONLY_FIELDS
+)
 
 
 class FieldState(str, Enum):

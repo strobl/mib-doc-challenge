@@ -77,6 +77,16 @@ class NoCueDetector:
 
 @unittest.skipIf(Image is None, "Pillow extraction dependency is not installed")
 class VisibleEvidenceTests(unittest.TestCase):
+    def test_policy_only_fields_are_normalized_for_adjudication(self):
+        normalize = VisibleEvidenceExtractor._normalize_value
+
+        self.assertEqual(normalize("stay_duration_days", "90 Earth days"), "90")
+        self.assertEqual(normalize("packet_receipt_date", "04/20/2026"), "2026-04-20")
+        self.assertEqual(normalize("biohazard_check", "GREEN / clean"), "clean")
+        self.assertEqual(normalize("hardship_waiver", "approved"), "valid")
+        self.assertEqual(normalize("diplomatic_note", "present"), "valid")
+        self.assertEqual(normalize("work_permit_requested", "yes"), "yes")
+
     def rendered_case(self, text_layer=()):
         return RenderedCase(
             source_path=Path("MIB-000001.pdf"),

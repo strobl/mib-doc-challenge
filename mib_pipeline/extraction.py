@@ -324,6 +324,32 @@ FIELD_ALIASES = {
     "risk_flags": ("risk flags", "risk flag", "flags"),
     "fee_status": ("fee status", "fee"),
     "adjudication": ("adjudication", "decision", "final status"),
+    "stay_duration_days": (
+        "requested stay days",
+        "requested stay",
+        "stay duration",
+        "duration of stay",
+        "requested duration",
+    ),
+    "packet_receipt_date": (
+        "packet receipt date",
+        "packet received",
+        "packet date",
+        "received on",
+        "received date",
+        "receipt date",
+    ),
+    "biohazard_check": (
+        "biohazard check",
+        "biohazard status",
+        "biohazard screening",
+    ),
+    "hardship_waiver": ("hardship waiver", "fee waiver"),
+    "diplomatic_note": ("diplomatic note",),
+    "work_permit_requested": (
+        "work permit requested",
+        "work authorization requested",
+    ),
 }
 
 
@@ -409,7 +435,7 @@ class VisibleEvidenceExtractor:
             match = re.search(r"SPN\s*[-:]\s*([0-9]{4})", value, re.I)
             candidate = f"SPN-{match.group(1)}" if match else value.upper()
             return candidate if SPONSOR_ID_PATTERN.fullmatch(candidate) else None
-        if field_name == "arrival_date":
+        if field_name in {"arrival_date", "packet_receipt_date"}:
             from datetime import datetime
 
             for pattern in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
@@ -417,6 +443,29 @@ class VisibleEvidenceExtractor:
                     return datetime.strptime(value, pattern).date().isoformat()
                 except ValueError:
                     continue
+            return None
+        if field_name == "stay_duration_days":
+            match = re.search(r"\b([0-9]{1,4})\b", value)
+            if match is None or int(match.group(1)) < 1:
+                return None
+            return str(int(match.group(1)))
+        if field_name in {
+            "hardship_waiver",
+            "diplomatic_note",
+            "work_permit_requested",
+        }:
+            candidate = value.casefold().replace("_", " ")
+            if re.search(r"\b(?:valid|approved|granted|yes|present|true)\b", candidate):
+                return "yes" if field_name == "work_permit_requested" else "valid"
+            if re.search(r"\b(?:invalid|denied|no|absent|false|none)\b", candidate):
+                return "no" if field_name == "work_permit_requested" else "invalid"
+            return None
+        if field_name == "biohazard_check":
+            candidate = value.casefold().replace("_", " ")
+            if re.search(r"\b(?:clean|clear|green|negative)\b", candidate):
+                return "clean"
+            if re.search(r"\b(?:red|positive|biohazard red)\b", candidate):
+                return "red"
             return None
         if field_name == "fee_status":
             candidate = value.casefold().replace(" ", "_")

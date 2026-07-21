@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Offline two-argument runtime scaffold for the MIB case processor.
-
-WO-1 establishes the container boundary only. Case processing and canonical
-row serialization are intentionally implemented by later work orders.
-"""
+"""Offline two-argument runtime for the MIB case processor."""
 
 from __future__ import annotations
 
@@ -13,12 +9,12 @@ from pathlib import Path
 from typing import Sequence
 
 from mib_pipeline import (
+    AdjudicatingCaseProcessor,
+    AdjudicationEngine,
     BatchRunner,
     CaseLinker,
     DocumentRenderer,
     EvidencePrecedenceResolver,
-    ResolveThenFallbackProcessor,
-    SafeFallbackProcessor,
     VisibleEvidenceExtractor,
     discover_case_pdfs,
 )
@@ -80,18 +76,18 @@ def parse_paths(argv: Sequence[str]) -> tuple[Path, Path]:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the offline scaffold and return a process exit code."""
+    """Run the offline processor and return a process exit code."""
 
     arguments = sys.argv if argv is None else argv
     try:
         input_dir, output_path = parse_paths(arguments)
         runner = BatchRunner(
-            ResolveThenFallbackProcessor(
+            AdjudicatingCaseProcessor(
                 renderer=DocumentRenderer(),
                 extractor=VisibleEvidenceExtractor(),
                 linker=CaseLinker(),
                 resolver=EvidencePrecedenceResolver(),
-                fallback=SafeFallbackProcessor(),
+                adjudicator=AdjudicationEngine(),
             ),
             max_workers=configured_worker_limit(),
         )
