@@ -24,10 +24,12 @@ class RecoverableOcrError(RuntimeError):
 
 class EvidenceType(str, Enum):
     ADJUDICATOR_STAMP = "adjudicator_stamp"
+    SIGNED_MANUAL_NOTE = "signed_manual_note"
     INTAKE_FORM = "intake_form"
     BIOMETRIC_SLIP = "biometric_slip"
     SPONSOR_ATTESTATION = "sponsor_attestation"
     REGISTRY_EXTRACT = "registry_extract"
+    TEXT_LAYER = "text_layer"
 
 
 @dataclass(frozen=True)
@@ -63,6 +65,8 @@ class CandidateEvidence:
     ocr_confidence: float
     visual_cues: tuple[str, ...] = ()
     source: str = "visible_ocr"
+    case_id_hint: str | None = None
+    applicant_hint: str | None = None
 
 
 class RefinementModel(Protocol):
@@ -358,6 +362,8 @@ class VisibleEvidenceExtractor:
         normalized = text.casefold()
         if "adjudicator" in normalized or "official stamp" in normalized:
             return EvidenceType.ADJUDICATOR_STAMP
+        if "signed manual note" in normalized or "signed note" in normalized:
+            return EvidenceType.SIGNED_MANUAL_NOTE
         if "biometric" in normalized:
             return EvidenceType.BIOMETRIC_SLIP
         if "sponsor attestation" in normalized or "sponsor letter" in normalized:
@@ -430,6 +436,8 @@ class VisibleEvidenceExtractor:
     def extract(self, rendered_case: RenderedCase) -> tuple[CandidateEvidence, ...]:
         candidates: list[CandidateEvidence] = []
         evidence_type = EvidenceType.INTAKE_FORM
+        current_case_id = rendered_case.case_id
+        current_applicant: str | None = None
         for page in rendered_case.pages:
             tokens = self._ocr.read_page(page)
             lines = group_ocr_lines(tokens)
@@ -497,10 +505,21 @@ class VisibleEvidenceExtractor:
                     confidence >= self._minimum_legible_confidence
                     and normalized is not None
                 )
+                candidate_value = normalized if legible else None
+                candidate_case_id = (
+                    candidate_value
+                    if field_name == "case_id" and candidate_value is not None
+                    else current_case_id
+                )
+                candidate_applicant = (
+                    candidate_value
+                    if field_name == "applicant_name" and candidate_value is not None
+                    else current_applicant
+                )
                 candidates.append(
                     CandidateEvidence(
                         field_name=field_name,
-                        value=normalized if legible else None,
+                        value=candidate_value,
                         evidence_type=candidate_type,
                         page_index=page.index,
                         box=source_line.box,
@@ -508,6 +527,14 @@ class VisibleEvidenceExtractor:
                         superseded="strikethrough" in combined_cues,
                         ocr_confidence=confidence,
                         visual_cues=combined_cues,
+                        case_id_hint=candidate_case_id,
+                        applicant_hint=candidate_applicant,
                     )
                 )
+                if field_name == "case_id" and candidate_value is not None:
+                    if current_case_id != candidate_value:
+                        current_applicant = None
+                    current_case_id = candidate_value
+                elif field_name == "applicant_name" and candidate_value is not None:
+                    current_applicant = candidate_value
         return tuple(candidates)

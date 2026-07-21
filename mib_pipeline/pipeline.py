@@ -99,3 +99,21 @@ class ExtractThenFallbackProcessor:
         rendered = self.renderer.render(pdf_path)
         self.extractor.extract(rendered)
         return self.fallback.process_case(pdf_path)
+
+
+@dataclass
+class ResolveThenFallbackProcessor:
+    """Exercise linking/resolution before policy adjudication exists."""
+
+    renderer: RendererStage
+    extractor: EvidenceExtractor
+    linker: Any
+    resolver: EvidenceResolver
+    fallback: SafeFallbackProcessor
+
+    def process_case(self, pdf_path: Path) -> Mapping[str, Any]:
+        rendered = self.renderer.render(pdf_path)
+        candidates = self.extractor.extract(rendered)
+        linked_case = self.linker.link(rendered.case_id, candidates)
+        self.resolver.resolve(linked_case)
+        return self.fallback.process_case(pdf_path)
