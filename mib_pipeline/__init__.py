@@ -31,6 +31,12 @@ from .adjudication import (
     PolicyException,
     PolicyRuleSet,
 )
+from .confidence import (
+    CalibrationArtifactError,
+    ConfidenceCalibrator,
+    DecisionSignalModel,
+    PinnedIsotonicMap,
+)
 from .resolution import (
     CaseLinker,
     EvidencePrecedenceHierarchy,
@@ -59,9 +65,12 @@ __all__ = [
     "BatchRunner",
     "CanonicalJsonlWriter",
     "CandidateEvidence",
+    "CalibrationArtifactError",
     "CaseLinker",
+    "ConfidenceCalibrator",
     "DuplicateCaseIdError",
     "DecisionTrace",
+    "DecisionSignalModel",
     "DocumentRenderer",
     "EvidenceType",
     "EvidencePrecedenceHierarchy",
@@ -73,6 +82,7 @@ __all__ = [
     "GeneralizablePolicyExceptionStore",
     "PolicyException",
     "PolicyRuleSet",
+    "PinnedIsotonicMap",
     "PredictionRow",
     "ProcessingPipeline",
     "RecoverableRenderError",

@@ -12,8 +12,11 @@ links evidence to the active case and applicant, resolves fields through the
 published six-level precedence hierarchy, and applies deterministic policy.
 Missing, contested, illegible, or untrusted-only decision evidence is routed to
 `NEEDS_REVIEW`; `APPROVED` is emitted only after the stricter approval bar is
-cleared. The canonical writer emits exactly the twelve submission fields,
-rejects duplicate case IDs, and writes atomically.
+cleared. An offline, versioned isotonic map calibrates a policy-derived decision
+signal into the probability that the emitted adjudication is correct; it never
+uses OCR confidence as the calibration target. The canonical writer emits
+exactly the twelve submission fields, rejects duplicate case IDs, and writes
+atomically.
 
 ## Build from a clean checkout
 

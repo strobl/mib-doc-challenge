@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import date
 from types import MappingProxyType
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Protocol
 
 from .extraction import EvidenceType
 from .models import PredictionRow
@@ -157,6 +157,11 @@ class AdjudicationOutcome:
     trace: DecisionTrace
 
 
+class ConfidenceProvider(Protocol):
+    def calibrate(self, trace: DecisionTrace) -> float:
+        """Return P(the chosen adjudication is correct)."""
+
+
 def _field(resolved_case: ResolvedCase, field_name: str) -> ResolvedField | None:
     return resolved_case.fields.get(field_name)
 
@@ -213,10 +218,12 @@ class AdjudicationEngine:
         *,
         rules: PolicyRuleSet | None = None,
         exceptions: GeneralizablePolicyExceptionStore | None = None,
+        calibrator: ConfidenceProvider | None = None,
         default_confidence: float = 0.0,
     ) -> None:
         self._rules = rules or PolicyRuleSet()
         self._exceptions = exceptions or GeneralizablePolicyExceptionStore()
+        self._calibrator = calibrator
         self._default_confidence = default_confidence
 
     @staticmethod
@@ -268,6 +275,7 @@ class AdjudicationEngine:
         self,
         resolved_case: ResolvedCase,
         decision: str,
+        confidence: float,
     ) -> PredictionRow:
         values = {
             field_name: _value(resolved_case, field_name)
@@ -277,7 +285,7 @@ class AdjudicationEngine:
             {
                 "case_id": resolved_case.case_id,
                 "adjudication": decision,
-                "confidence": self._default_confidence,
+                "confidence": confidence,
             }
         )
         return PredictionRow.from_mapping(values, fallback_case_id=resolved_case.case_id)
@@ -299,8 +307,10 @@ class AdjudicationEngine:
                 else (),
                 exception_ids=(),
             )
+            confidence = self._confidence(trace)
             return AdjudicationOutcome(
-                row=self._assemble_row(resolved_case, authoritative), trace=trace
+                row=self._assemble_row(resolved_case, authoritative, confidence),
+                trace=trace,
             )
 
         denial_reasons: list[str] = []
@@ -452,9 +462,15 @@ class AdjudicationEngine:
             approval_facts=tuple(sorted(set(approval_facts))),
             exception_ids=exception_ids,
         )
+        confidence = self._confidence(trace)
         return AdjudicationOutcome(
-            row=self._assemble_row(resolved_case, decision), trace=trace
+            row=self._assemble_row(resolved_case, decision, confidence), trace=trace
         )
+
+    def _confidence(self, trace: DecisionTrace) -> float:
+        if self._calibrator is None:
+            return self._default_confidence
+        return self._calibrator.calibrate(trace)
 
     def adjudicate(self, resolved_case: ResolvedCase) -> PredictionRow:
         """Return the canonical row expected by the runtime pipeline."""

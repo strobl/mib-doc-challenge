@@ -12,7 +12,9 @@ from mib_pipeline import (
     AdjudicatingCaseProcessor,
     AdjudicationEngine,
     BatchRunner,
+    CalibrationArtifactError,
     CaseLinker,
+    ConfidenceCalibrator,
     DocumentRenderer,
     EvidencePrecedenceResolver,
     VisibleEvidenceExtractor,
@@ -87,12 +89,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 extractor=VisibleEvidenceExtractor(),
                 linker=CaseLinker(),
                 resolver=EvidencePrecedenceResolver(),
-                adjudicator=AdjudicationEngine(),
+                adjudicator=AdjudicationEngine(
+                    calibrator=ConfidenceCalibrator.from_pinned_artifact()
+                ),
             ),
             max_workers=configured_worker_limit(),
         )
         report = runner.run(input_dir, output_path)
-    except (ContractError, OSError) as exc:
+    except (CalibrationArtifactError, ContractError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 64
     print(

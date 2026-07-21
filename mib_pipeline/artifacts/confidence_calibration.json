@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "artifact_id": "bootstrap-policy-prior-v1",
+  "breakpoints": [0.0, 0.55, 0.65, 0.72, 0.78, 0.84, 0.9, 0.95, 1.0],
+  "probabilities": [0.25, 0.5, 0.61, 0.69, 0.76, 0.82, 0.89, 0.94, 0.97],
+  "fit_metadata": {
+    "method": "bootstrap_monotonic_prior",
+    "fit_split": "pending_wo8_honest_holdout",
+    "training_case_count": 0,
+    "target": "emitted_adjudication_is_correct"
+  }
+}
