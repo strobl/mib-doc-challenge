@@ -28,6 +28,7 @@ from .adjudication import (
     AdjudicationOutcome,
     DecisionTrace,
     GeneralizablePolicyExceptionStore,
+    PolicyArtifactError,
     PolicyException,
     PolicyRuleSet,
 )
@@ -80,6 +81,7 @@ __all__ = [
     "FieldState",
     "LinkedCase",
     "GeneralizablePolicyExceptionStore",
+    "PolicyArtifactError",
     "PolicyException",
     "PolicyRuleSet",
     "PinnedIsotonicMap",

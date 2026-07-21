@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import date
+from pathlib import Path
 from types import MappingProxyType
 from typing import Iterable, Mapping, Protocol
 
@@ -14,6 +16,9 @@ from .resolution import FieldState, ResolvedCase, ResolvedField
 
 
 VISA_CLASSES = frozenset({"XW-1", "XW-2", "DIP-1", "MED-3", "TRANSIT-7"})
+PINNED_POLICY_EXCEPTIONS_PATH = (
+    Path(__file__).resolve().parent / "artifacts" / "policy_exceptions.json"
+)
 OUTPUT_VALUE_FIELDS = (
     "applicant_name",
     "species_code",
@@ -25,6 +30,10 @@ OUTPUT_VALUE_FIELDS = (
     "risk_flags",
     "fee_status",
 )
+
+
+class PolicyArtifactError(ValueError):
+    """The pinned policy-exception artifact is absent, malformed, or unsafe."""
 
 
 @dataclass(frozen=True)
@@ -61,7 +70,14 @@ class GeneralizablePolicyExceptionStore:
     _PDF_NAME = re.compile(r"\.pdf\b", re.I)
     _HASH = re.compile(r"\b[0-9a-f]{32,64}\b", re.I)
 
-    def __init__(self, exceptions: Iterable[PolicyException] = ()) -> None:
+    def __init__(
+        self,
+        exceptions: Iterable[PolicyException] = (),
+        *,
+        artifact_id: str = "inline-policy-exceptions",
+    ) -> None:
+        if not artifact_id:
+            raise ValueError("policy exception artifact_id must be non-empty")
         checked: list[PolicyException] = []
         seen_ids: set[str] = set()
         for exception in exceptions:
@@ -103,6 +119,55 @@ class GeneralizablePolicyExceptionStore:
                 )
             )
         self._exceptions = tuple(checked)
+        self._artifact_id = artifact_id
+
+    @classmethod
+    def from_pinned_artifact(
+        cls,
+        path: Path = PINNED_POLICY_EXCEPTIONS_PATH,
+    ) -> "GeneralizablePolicyExceptionStore":
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise PolicyArtifactError(
+                f"cannot load policy exception artifact: {path}"
+            ) from exc
+        if not isinstance(value, dict) or set(value) != {
+            "schema_version",
+            "artifact_id",
+            "exceptions",
+        }:
+            raise PolicyArtifactError("unsupported policy exception artifact schema")
+        if value.get("schema_version") != 1 or not isinstance(
+            value.get("exceptions"), list
+        ):
+            raise PolicyArtifactError("unsupported policy exception artifact schema")
+        exceptions: list[PolicyException] = []
+        for raw_rule in value["exceptions"]:
+            if not isinstance(raw_rule, dict) or set(raw_rule) != {
+                "rule_id",
+                "conditions",
+                "decision",
+                "rationale",
+            }:
+                raise PolicyArtifactError("malformed policy exception rule")
+            exceptions.append(
+                PolicyException(
+                    rule_id=raw_rule["rule_id"],
+                    conditions=raw_rule["conditions"],
+                    decision=raw_rule["decision"],
+                    rationale=raw_rule["rationale"],
+                    validated=True,
+                )
+            )
+        try:
+            return cls(exceptions, artifact_id=value.get("artifact_id", ""))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise PolicyArtifactError("unsafe policy exception artifact") from exc
+
+    @property
+    def artifact_id(self) -> str:
+        return self._artifact_id
 
     def matching(self, features: Mapping[str, str]) -> tuple[PolicyException, ...]:
         """Return exact feature matches in stable rule-ID order."""

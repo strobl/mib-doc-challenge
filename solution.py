@@ -17,6 +17,8 @@ from mib_pipeline import (
     ConfidenceCalibrator,
     DocumentRenderer,
     EvidencePrecedenceResolver,
+    GeneralizablePolicyExceptionStore,
+    PolicyArtifactError,
     VisibleEvidenceExtractor,
     discover_case_pdfs,
 )
@@ -90,13 +92,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 linker=CaseLinker(),
                 resolver=EvidencePrecedenceResolver(),
                 adjudicator=AdjudicationEngine(
-                    calibrator=ConfidenceCalibrator.from_pinned_artifact()
+                    calibrator=ConfidenceCalibrator.from_pinned_artifact(),
+                    exceptions=GeneralizablePolicyExceptionStore.from_pinned_artifact(),
                 ),
             ),
             max_workers=configured_worker_limit(),
         )
         report = runner.run(input_dir, output_path)
-    except (CalibrationArtifactError, ContractError, OSError) as exc:
+    except (CalibrationArtifactError, ContractError, OSError, PolicyArtifactError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 64
     print(
