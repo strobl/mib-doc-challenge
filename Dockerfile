@@ -22,6 +22,15 @@ ENV BLIS_NUM_THREADS=4 \
 
 WORKDIR /app
 
+ARG TESSERACT_VERSION=5.3.0-2
+ARG TESSERACT_DATA_VERSION=1:4.1.0-2
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends \
+      "tesseract-ocr=${TESSERACT_VERSION}" \
+      "tesseract-ocr-eng=${TESSERACT_DATA_VERSION}" \
+      "tesseract-ocr-osd=${TESSERACT_DATA_VERSION}" \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.lock /app/requirements.lock
 RUN python3 -m pip install \
       --disable-pip-version-check \

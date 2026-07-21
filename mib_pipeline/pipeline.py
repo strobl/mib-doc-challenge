@@ -85,3 +85,17 @@ class RenderFirstFallbackProcessor:
     def process_case(self, pdf_path: Path) -> Mapping[str, Any]:
         self.renderer.render(pdf_path)
         return self.fallback.process_case(pdf_path)
+
+
+@dataclass
+class ExtractThenFallbackProcessor:
+    """Exercise visible extraction before resolution/adjudication exist."""
+
+    renderer: RendererStage
+    extractor: EvidenceExtractor
+    fallback: SafeFallbackProcessor
+
+    def process_case(self, pdf_path: Path) -> Mapping[str, Any]:
+        rendered = self.renderer.render(pdf_path)
+        self.extractor.extract(rendered)
+        return self.fallback.process_case(pdf_path)

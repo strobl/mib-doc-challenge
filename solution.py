@@ -15,8 +15,9 @@ from typing import Sequence
 from mib_pipeline import (
     BatchRunner,
     DocumentRenderer,
-    RenderFirstFallbackProcessor,
+    ExtractThenFallbackProcessor,
     SafeFallbackProcessor,
+    VisibleEvidenceExtractor,
     discover_case_pdfs,
 )
 
@@ -83,8 +84,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         input_dir, output_path = parse_paths(arguments)
         runner = BatchRunner(
-            RenderFirstFallbackProcessor(
+            ExtractThenFallbackProcessor(
                 renderer=DocumentRenderer(),
+                extractor=VisibleEvidenceExtractor(),
                 fallback=SafeFallbackProcessor(),
             ),
             max_workers=configured_worker_limit(),

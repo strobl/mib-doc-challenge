@@ -23,7 +23,8 @@ The image uses an exact Python patch release. Runtime Python dependencies are
 listed in `requirements.lock` and installed during the image build with hash
 checking enabled. Linux x86_64 and ARM64 wheel hashes are pinned for the PDFium,
 Pillow, and NumPy rendering stack. Runtime installation or downloads are not
-used.
+used. Tesseract 5 and its English/OSD data are installed at image-build time
+from version-pinned Debian packages and run only against rendered page pixels.
 
 ## Run with the scoring constraints
 
