@@ -50,6 +50,11 @@ python3 scripts/validate_submission.py --submission /tmp/mib-output/predictions.
 
 `examples/offline_baseline/` is a tiny format-valid submission you can use to test the plumbing.
 
+The repository root also contains the production-oriented offline runtime
+scaffold. See [`RUNTIME.md`](RUNTIME.md) for its clean-checkout build command,
+the exact constrained Docker invocation, and the boundary between WO-1 and the
+downstream case-processing work.
+
 ## Output Format
 
 One JSON object per line, one line per answered case:
@@ -115,6 +120,7 @@ Do not modify files outside your own `submissions/` folder. You may reuse public
 | `PRD.md` | Product context and task requirements |
 | `EVALUATION.md` | Scoring, leaderboard, and anti-cheat rules |
 | `DOCKER_SUBMISSION.md` | Offline Docker submission contract |
+| `RUNTIME.md` | Root solution image build, run, and offline-runtime guarantees |
 | `data/README.md` | Data download instructions and checksum |
 | `schemas/` | Prediction and evaluator output JSON schemas |
 | `examples/` | Valid submission samples and a minimal Docker baseline |

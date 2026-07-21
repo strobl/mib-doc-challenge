@@ -1,0 +1,7 @@
+# WO-1 runtime scaffold uses only the Python 3.12 standard library.
+#
+# Add future runtime packages as exact versions with hashes, for example:
+# package-name==1.2.3 --hash=sha256:<artifact-hash>
+#
+# The Docker build installs this file with pip --require-hashes. Runtime
+# installation and downloads are never permitted.
