@@ -14,11 +14,15 @@ manifest to an external working directory:
 python3 scripts/evaluation_harness.py split \
   --truth data/train_labels.csv \
   --seed mib-public-v1 \
+  --label-output-dir /tmp/mib-evaluation/labels \
   --output /tmp/mib-evaluation/splits.json
 ```
 
 The three partitions are disjoint. A calibration or release result must declare
 which split(s) were used for tuning, and the harness rejects self-evaluation.
+If any cases were inspected before freezing a revised split, pass their CSV via
+`--forced-tuning-manifest`. The splitter pins them to tuning before assigning
+fresh calibration and release cases, preventing accidental holdout reuse.
 
 ## Official score and breakdowns
 
@@ -102,3 +106,6 @@ The image contains tooling, schemas, and runtime artifact validators, but no
 `data/` directory. Mount labels and predictions read-only and reports writable.
 The submitted root `Dockerfile` never copies `devtools/`, the evaluation CLI, or
 evaluation reports.
+
+The frozen WO-8 protocol and aggregate gate result are recorded in
+[`evaluation/RELEASE_EVIDENCE.md`](evaluation/RELEASE_EVIDENCE.md).

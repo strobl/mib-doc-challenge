@@ -86,6 +86,25 @@ class CaseLinkerTests(unittest.TestCase):
         self.assertIn("multiple applicants", result.unresolved_reasons[0])
         self.assertFalse(any(item.field_name == "home_world" for item in result.evidence))
 
+    def test_higher_precedence_applicant_scopes_lower_conflicting_evidence(self):
+        evidence = [
+            candidate("applicant_name", "Zed Zarnax", EvidenceType.INTAKE_FORM),
+            candidate(
+                "applicant_name",
+                "Other Person",
+                EvidenceType.SPONSOR_ATTESTATION,
+                applicant_hint="Other Person",
+                page=2,
+            ),
+            candidate("home_world", "Kepler-186f", EvidenceType.INTAKE_FORM),
+        ]
+
+        result = linked(*evidence)
+
+        self.assertEqual(result.active_applicant, "Zed Zarnax")
+        self.assertFalse(result.unresolved)
+        self.assertNotIn("Other Person", {item.value for item in result.evidence})
+
     def test_conflicting_visible_case_id_marks_linkage_unresolved(self):
         result = linked(
             candidate(

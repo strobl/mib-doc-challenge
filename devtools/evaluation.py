@@ -115,7 +115,14 @@ class HoldoutSplitManager:
     def split_rows(
         self,
         rows: Iterable[Mapping[str, str]],
+        *,
+        forced_tuning_case_ids: Iterable[str] = (),
     ) -> dict[str, tuple[str, ...]]:
+        forced_tuning = {
+            str(case_id).strip()
+            for case_id in forced_tuning_case_ids
+            if str(case_id).strip()
+        }
         grouped: dict[str, list[str]] = defaultdict(list)
         seen: set[str] = set()
         for row in rows:
@@ -126,17 +133,28 @@ class HoldoutSplitManager:
             seen.add(case_id)
             grouped[adjudication].append(case_id)
 
+        unknown_forced = forced_tuning - seen
+        if unknown_forced:
+            raise EvaluationConfigurationError(
+                "forced tuning cases are absent from truth: "
+                + ", ".join(sorted(unknown_forced)[:5])
+            )
+
         splits: dict[str, list[str]] = {role: [] for role in self.ROLES}
         for case_ids in grouped.values():
-            ordered = sorted(case_ids, key=self._key)
-            tuning_end = round(len(ordered) * self._tuning_fraction)
-            calibration_end = tuning_end + round(
-                len(ordered) * self._calibration_fraction
+            forced_in_group = sorted(set(case_ids) & forced_tuning)
+            eligible = sorted(set(case_ids) - forced_tuning, key=self._key)
+            tuning_target = round(len(case_ids) * self._tuning_fraction)
+            tuning_count = max(0, tuning_target - len(forced_in_group))
+            calibration_count = round(
+                len(case_ids) * self._calibration_fraction
             )
-            calibration_end = min(calibration_end, len(ordered))
-            splits["tuning"].extend(ordered[:tuning_end])
-            splits["calibration"].extend(ordered[tuning_end:calibration_end])
-            splits["release"].extend(ordered[calibration_end:])
+            tuning_end = min(tuning_count, len(eligible))
+            calibration_end = min(tuning_end + calibration_count, len(eligible))
+            splits["tuning"].extend(forced_in_group)
+            splits["tuning"].extend(eligible[:tuning_end])
+            splits["calibration"].extend(eligible[tuning_end:calibration_end])
+            splits["release"].extend(eligible[calibration_end:])
 
         result = {role: tuple(sorted(ids)) for role, ids in splits.items()}
         self.assert_disjoint(result)
@@ -838,3 +856,15 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
 def read_csv(path: Path) -> list[dict[str, str]]:
     with path.open(newline="", encoding="utf-8") as handle:
         return list(csv.DictReader(handle))
+
+
+def write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
+    if not rows:
+        raise EvaluationConfigurationError("cannot write an empty split label file")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    with temporary.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    temporary.replace(path)

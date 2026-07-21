@@ -138,22 +138,29 @@ class CaseLinker:
             or not case_id
             or candidate.case_id_hint == case_id
         )
-        applicant_names = {
-            candidate.value
+        applicant_evidence = tuple(
+            candidate
             for candidate in case_scoped
             if candidate.field_name == "applicant_name"
             and candidate.legible
             and candidate.value
-        }
-        hinted_for_case = {
-            candidate.applicant_hint
-            for candidate in case_scoped
-            if candidate.case_id_hint == case_id and candidate.applicant_hint
-        }
-        if len(hinted_for_case) == 1:
-            active_applicant = next(iter(hinted_for_case))
-        elif len(applicant_names) == 1:
-            active_applicant = next(iter(applicant_names))
+        )
+        applicant_names = {candidate.value for candidate in applicant_evidence}
+        if applicant_evidence:
+            best_rank = min(
+                EvidencePrecedenceHierarchy.rank(candidate.evidence_type)
+                for candidate in applicant_evidence
+            )
+            best_names = {
+                candidate.value
+                for candidate in applicant_evidence
+                if EvidencePrecedenceHierarchy.rank(candidate.evidence_type)
+                == best_rank
+            }
+        else:
+            best_names = set()
+        if len(best_names) == 1:
+            active_applicant = next(iter(best_names))
         elif len(applicant_names) > 1:
             active_applicant = None
             reasons.append("multiple applicants cannot be reliably separated")

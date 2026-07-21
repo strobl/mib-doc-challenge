@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import difflib
 import io
 import os
 import re
@@ -86,7 +87,7 @@ class TesseractOcrEngine:
         *,
         binary: str = "tesseract",
         language: str = "eng",
-        page_segmentation_mode: int = 6,
+        page_segmentation_mode: int = 11,
         timeout_seconds: float = 5.0,
     ) -> None:
         if not 1 <= page_segmentation_mode <= 13:
@@ -226,6 +227,48 @@ def group_ocr_lines(tokens: Iterable[OcrToken]) -> tuple[OcrLine, ...]:
     return tuple(lines)
 
 
+def _visual_reading_order(lines: Iterable[OcrLine]) -> tuple[OcrLine, ...]:
+    """Order sparse OCR lines by visual row, then from left to right.
+
+    Tesseract's sparse-text mode deliberately emits independently detected
+    regions. Its block order is therefore not a reliable reading order, and a
+    table value may otherwise precede its label. Row clustering tolerates the
+    small vertical drift commonly seen between two cells on the same row.
+    """
+
+    remaining = sorted(
+        lines,
+        key=lambda line: (
+            line.page_index,
+            (line.box.bottom + line.box.top) / 2.0,
+            line.box.left,
+        ),
+    )
+    ordered: list[OcrLine] = []
+    while remaining:
+        anchor = remaining.pop(0)
+        anchor_center = (anchor.box.bottom + anchor.box.top) / 2.0
+        anchor_height = max(1.0, anchor.box.height)
+        row = [anchor]
+        rest: list[OcrLine] = []
+        for line in remaining:
+            if line.page_index != anchor.page_index:
+                rest.append(line)
+                continue
+            center = (line.box.bottom + line.box.top) / 2.0
+            tolerance = max(
+                4.0,
+                min(anchor_height, max(1.0, line.box.height)) * 0.75,
+            )
+            if abs(center - anchor_center) <= tolerance:
+                row.append(line)
+            else:
+                rest.append(line)
+        ordered.extend(sorted(row, key=lambda line: line.box.left))
+        remaining = rest
+    return tuple(ordered)
+
+
 class UntrustedContentFilter:
     """Keep injected or non-visible material outside CandidateEvidence."""
 
@@ -314,14 +357,20 @@ class VisualCueDetector:
 
 FIELD_ALIASES = {
     "case_id": ("case id", "mib case", "application id"),
-    "applicant_name": ("applicant name", "full name", "name"),
-    "species_code": ("species code", "species"),
+    "applicant_name": (
+        "applicant name",
+        "registry name",
+        "full name",
+        "applicant",
+        "name",
+    ),
+    "species_code": ("species code", "species match", "species"),
     "home_world": ("home world", "homeworld", "origin world"),
     "visa_class": ("visa class", "visa"),
     "sponsor_id": ("sponsor id", "sponsor"),
     "arrival_date": ("arrival date", "date of arrival"),
     "declared_purpose": ("declared purpose", "purpose of visit", "purpose"),
-    "risk_flags": ("risk flags", "risk flag", "flags"),
+    "risk_flags": ("observed flags", "risk flags", "risk flag", "flags"),
     "fee_status": ("fee status", "fee"),
     "adjudication": ("adjudication", "decision", "final status"),
     "stay_duration_days": (
@@ -351,6 +400,19 @@ FIELD_ALIASES = {
         "work authorization requested",
     ),
 }
+
+KNOWN_RISK_FLAGS = frozenset(
+    {
+        "memory_tampering",
+        "planetary_embargo",
+        "active_warrant",
+        "biohazard_red",
+        "identity_conflict",
+        "sponsor_mismatch",
+        "illegible_biometrics",
+        "rescinded_denial",
+    }
+)
 
 
 class VisibleEvidenceExtractor:
@@ -386,23 +448,43 @@ class VisibleEvidenceExtractor:
     @staticmethod
     def _evidence_type(text: str, current: EvidenceType) -> EvidenceType:
         normalized = text.casefold()
-        if "adjudicator" in normalized or "official stamp" in normalized:
-            return EvidenceType.ADJUDICATOR_STAMP
-        if "signed manual note" in normalized or "signed note" in normalized:
+        if (
+            "manual adjudicator note" in normalized
+            or "signed manual note" in normalized
+            or "signed note" in normalized
+        ):
             return EvidenceType.SIGNED_MANUAL_NOTE
+        if "adjudicator stamp" in normalized or "official stamp" in normalized:
+            return EvidenceType.ADJUDICATOR_STAMP
         if "biometric" in normalized:
             return EvidenceType.BIOMETRIC_SLIP
         if "sponsor attestation" in normalized or "sponsor letter" in normalized:
             return EvidenceType.SPONSOR_ATTESTATION
         if "registry extract" in normalized or "registry record" in normalized:
             return EvidenceType.REGISTRY_EXTRACT
-        if "intake form" in normalized or "application form" in normalized:
+        if (
+            "intake form" in normalized
+            or "application form" in normalized
+            or "form i-8090" in normalized
+            or "work authorization intake" in normalized
+            or "primary intake record" in normalized
+        ):
             return EvidenceType.INTAKE_FORM
         return current
 
     @staticmethod
     def _match_field(text: str) -> tuple[str, str] | None:
         normalized = " ".join(text.strip().split())
+        narrative_decision = re.search(
+            r"\b(?:finding|decision|final\s+status)\s*(?::|=|-)\s*"
+            r"(APPROVED|DENIED|NEEDS[ _-]REVIEW)\b",
+            normalized,
+            flags=re.I,
+        )
+        if narrative_decision:
+            return "adjudication", narrative_decision.group(1)
+        if re.fullmatch(r"(?:APPROVED|DENIED|NEEDS[ _-]REVIEW)", normalized, re.I):
+            return "adjudication", normalized
         aliases = sorted(
             (
                 (alias, field_name)
@@ -421,6 +503,42 @@ class VisibleEvidenceExtractor:
             if match:
                 return field_name, match.group(1).strip()
         return None
+
+    @staticmethod
+    def _risk_flags_from_text(text: str) -> tuple[str, ...]:
+        """Read explicit/derived visible risk wording, including mild OCR noise."""
+
+        normalized = re.sub(r"[^a-z0-9]+", "_", text.casefold()).strip("_")
+        found = {
+            flag
+            for flag in KNOWN_RISK_FLAGS
+            if re.search(rf"(?:^|_){re.escape(flag)}(?:_|$)", normalized)
+        }
+        if re.search(r"identity.*(?:mismatch|conflict|failed)", text, re.I):
+            found.add("identity_conflict")
+        if re.search(r"biometric.*(?:illegible|unreadable|failed)", text, re.I):
+            found.add("illegible_biometrics")
+
+        risk_suffix = re.search(
+            r"(?:risk\s+flags?|observed\s+flags?)\s*(?::|=|-)?\s*(.*)$",
+            text,
+            re.I,
+        )
+        if risk_suffix:
+            raw_items = re.split(r"[,;|\s]+", risk_suffix.group(1))
+            for raw_item in raw_items:
+                item = re.sub(r"[^a-z_]", "", raw_item.casefold())
+                if not item or item in {"none", "reason", "disqualifying"}:
+                    continue
+                close = difflib.get_close_matches(
+                    item,
+                    sorted(KNOWN_RISK_FLAGS),
+                    n=1,
+                    cutoff=0.72,
+                )
+                if close:
+                    found.add(close[0])
+        return tuple(sorted(found))
 
     @staticmethod
     def _normalize_value(field_name: str, raw_value: str) -> str | None:
@@ -484,12 +602,19 @@ class VisibleEvidenceExtractor:
 
     def extract(self, rendered_case: RenderedCase) -> tuple[CandidateEvidence, ...]:
         candidates: list[CandidateEvidence] = []
+        risk_observations: list[
+            tuple[tuple[str, ...], OcrLine, tuple[str, ...], EvidenceType]
+        ] = []
         evidence_type = EvidenceType.INTAKE_FORM
         current_case_id = rendered_case.case_id
         current_applicant: str | None = None
         for page in rendered_case.pages:
+            # Each PDF page is a separate document type in the challenge
+            # packets. Never inherit a lower-precedence page type onto the next
+            # page when its heading is partially degraded.
+            evidence_type = EvidenceType.INTAKE_FORM
             tokens = self._ocr.read_page(page)
-            lines = group_ocr_lines(tokens)
+            lines = _visual_reading_order(group_ocr_lines(tokens))
             page_image = self._page_image(page)
             page_visual = (
                 self._cues.prepare_page(page_image)
@@ -512,6 +637,11 @@ class VisibleEvidenceExtractor:
                     continue
 
                 evidence_type = self._evidence_type(line.text, evidence_type)
+                observed_flags = self._risk_flags_from_text(line.text)
+                if observed_flags and "strikethrough" not in cues:
+                    risk_observations.append(
+                        (observed_flags, line, cues, evidence_type)
+                    )
                 matched = self._match_field(line.text)
                 if pending_field is not None and matched is None:
                     field_name, label_line, label_cues, label_type = pending_field
@@ -586,4 +716,49 @@ class VisibleEvidenceExtractor:
                     current_case_id = candidate_value
                 elif field_name == "applicant_name" and candidate_value is not None:
                     current_applicant = candidate_value
+
+        if risk_observations:
+            observed_values = {
+                flag
+                for flags, _line, _cues, _evidence_type in risk_observations
+                for flag in flags
+            }
+            candidates = [
+                candidate
+                for candidate in candidates
+                if candidate.field_name != "risk_flags"
+            ]
+            _flags, line, cues, candidate_type = min(
+                risk_observations,
+                key=lambda item: (
+                    {
+                        EvidenceType.ADJUDICATOR_STAMP: 1,
+                        EvidenceType.SIGNED_MANUAL_NOTE: 1,
+                        EvidenceType.INTAKE_FORM: 2,
+                        EvidenceType.BIOMETRIC_SLIP: 3,
+                        EvidenceType.SPONSOR_ATTESTATION: 4,
+                        EvidenceType.REGISTRY_EXTRACT: 5,
+                        EvidenceType.TEXT_LAYER: 6,
+                    }[item[3]],
+                    item[1].page_index,
+                ),
+            )
+            candidates.append(
+                CandidateEvidence(
+                    field_name="risk_flags",
+                    value="|".join(sorted(observed_values)),
+                    evidence_type=candidate_type,
+                    page_index=line.page_index,
+                    box=line.box,
+                    legible=True,
+                    superseded="strikethrough" in cues,
+                    ocr_confidence=line.confidence,
+                    visual_cues=cues,
+                    case_id_hint=rendered_case.case_id,
+                    # Risk markers apply to the active case as a whole. Do not
+                    # let a lower-precedence applicant mention on a later page
+                    # scope a visible case-level risk marker away.
+                    applicant_hint=None,
+                )
+            )
         return tuple(candidates)

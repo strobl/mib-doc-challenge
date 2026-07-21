@@ -24,6 +24,7 @@ from devtools.evaluation import (  # noqa: E402
     read_csv,
     read_json,
     read_jsonl,
+    write_csv,
     write_json,
 )
 
@@ -58,14 +59,28 @@ def command_split(args: argparse.Namespace) -> int:
         tuning_fraction=args.tuning_fraction,
         calibration_fraction=args.calibration_fraction,
     )
-    splits = manager.split_rows(read_csv(Path(args.truth)))
+    truth_rows = read_csv(Path(args.truth))
+    forced_tuning_case_ids = _manifest_ids(args.forced_tuning_manifest)
+    splits = manager.split_rows(
+        truth_rows,
+        forced_tuning_case_ids=forced_tuning_case_ids,
+    )
     payload = {
         "manifest_version": "mib_honest_holdout_v1",
         "seed_label": args.seed_label,
+        "forced_tuning_case_count": len(forced_tuning_case_ids),
         "splits": {name: list(case_ids) for name, case_ids in splits.items()},
         "counts": {name: len(case_ids) for name, case_ids in splits.items()},
     }
     write_json(_outside_runtime_artifacts(Path(args.output)), payload)
+    if args.label_output_dir:
+        output_dir = _outside_runtime_artifacts(Path(args.label_output_dir))
+        for role, case_ids in splits.items():
+            selected = set(case_ids)
+            write_csv(
+                output_dir / f"{role}.csv",
+                [row for row in truth_rows if row["case_id"] in selected],
+            )
     return 0
 
 
@@ -216,6 +231,11 @@ def build_parser() -> argparse.ArgumentParser:
     split.add_argument("--output", required=True)
     split.add_argument("--seed", required=True)
     split.add_argument("--seed-label", default="local-reproducible-v1")
+    split.add_argument("--label-output-dir")
+    split.add_argument(
+        "--forced-tuning-manifest",
+        help="CSV of previously inspected cases that must remain in tuning",
+    )
     split.add_argument("--tuning-fraction", type=float, default=0.7)
     split.add_argument("--calibration-fraction", type=float, default=0.15)
     split.set_defaults(handler=command_split)

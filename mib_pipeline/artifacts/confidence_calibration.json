@@ -1,12 +1,23 @@
 {
-  "schema_version": 1,
-  "artifact_id": "bootstrap-policy-prior-v1",
-  "breakpoints": [0.0, 0.55, 0.65, 0.72, 0.78, 0.84, 0.9, 0.95, 1.0],
-  "probabilities": [0.25, 0.5, 0.61, 0.69, 0.76, 0.82, 0.89, 0.94, 0.97],
+  "artifact_id": "public-calibration-v2-visible-policy",
+  "breakpoints": [0.0, 0.74, 0.75, 0.76, 0.79, 0.9, 0.92, 1.0],
   "fit_metadata": {
-    "method": "bootstrap_monotonic_prior",
-    "fit_split": "pending_wo8_honest_holdout",
-    "training_case_count": 0,
-    "target": "emitted_adjudication_is_correct"
-  }
+    "fit_split": "public-calibration-v2",
+    "fit_split_role": "calibration",
+    "method": "pool_adjacent_violators_isotonic_regression",
+    "positive_target_count": 80,
+    "target": "emitted_adjudication_is_correct",
+    "training_case_count": 150
+  },
+  "probabilities": [
+    0.0,
+    0.0,
+    0.0,
+    0.29545454545454547,
+    0.4,
+    0.6666666666666666,
+    0.8793103448275862,
+    0.8793103448275862
+  ],
+  "schema_version": 1
 }

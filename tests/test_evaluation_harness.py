@@ -90,6 +90,29 @@ class HoldoutSplitTests(unittest.TestCase):
                 tuned_on_splits=("release-v1",),
             )
 
+    def test_previously_inspected_cases_are_forced_into_tuning(self):
+        rows = [
+            truth_row(f"MIB-{index:06d}", ("APPROVED", "DENIED")[index % 2])
+            for index in range(1, 41)
+        ]
+        forced = {"MIB-000001", "MIB-000002", "MIB-000003"}
+
+        splits = HoldoutSplitManager(seed="repro-v2").split_rows(
+            rows,
+            forced_tuning_case_ids=forced,
+        )
+
+        self.assertTrue(forced <= set(splits["tuning"]))
+        self.assertFalse(forced & set(splits["calibration"]))
+        self.assertFalse(forced & set(splits["release"]))
+
+    def test_unknown_forced_tuning_case_is_rejected(self):
+        with self.assertRaises(EvaluationConfigurationError):
+            HoldoutSplitManager(seed="repro-v2").split_rows(
+                [truth_row("MIB-000001", "APPROVED")],
+                forced_tuning_case_ids=("MIB-999999",),
+            )
+
 
 class EvaluationHarnessTests(unittest.TestCase):
     def test_wraps_official_evaluator_with_required_breakdowns_and_metrics(self):

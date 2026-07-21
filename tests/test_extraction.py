@@ -87,6 +87,38 @@ class VisibleEvidenceTests(unittest.TestCase):
         self.assertEqual(normalize("diplomatic_note", "present"), "valid")
         self.assertEqual(normalize("work_permit_requested", "yes"), "yes")
 
+    def test_visible_narrative_decision_and_noisy_risk_flag_are_recognized(self):
+        self.assertEqual(
+            VisibleEvidenceExtractor._match_field(
+                "Finding: DENIED. Reason: Disqualifying risk flag: planetary_egnbarg"
+            ),
+            ("adjudication", "DENIED"),
+        )
+        self.assertEqual(
+            VisibleEvidenceExtractor._risk_flags_from_text(
+                "Finding: DENIED. Reason: Disqualifying risk flag: planetary_egnbarg"
+            ),
+            ("planetary_embargo",),
+        )
+        self.assertEqual(
+            VisibleEvidenceExtractor._risk_flags_from_text(
+                "Observed flags: active_warrant, illegible_biometrics"
+            ),
+            ("active_warrant", "illegible_biometrics"),
+        )
+
+    def test_document_headings_map_to_the_binding_precedence_type(self):
+        classify = VisibleEvidenceExtractor._evidence_type
+
+        self.assertIs(
+            classify("Manual Adjudicator Note", EvidenceType.INTAKE_FORM),
+            EvidenceType.SIGNED_MANUAL_NOTE,
+        )
+        self.assertIs(
+            classify("FORM I-8090: Work Authorization Intake", EvidenceType.REGISTRY_EXTRACT),
+            EvidenceType.INTAKE_FORM,
+        )
+
     def rendered_case(self, text_layer=()):
         return RenderedCase(
             source_path=Path("MIB-000001.pdf"),
@@ -122,6 +154,28 @@ class VisibleEvidenceTests(unittest.TestCase):
         self.assertTrue(all(item.legible for item in candidates))
         self.assertTrue(
             all(item.evidence_type is EvidenceType.INTAKE_FORM for item in candidates)
+        )
+
+    def test_sparse_table_cells_are_paired_in_visual_reading_order(self):
+        tokens = [
+            token("Ixodane", 1, left=420, word_num=1),
+            token("Luzarn", 1, left=520, word_num=2),
+            token("Registry", 2, left=20, top=42, word_num=1),
+            token("Name", 2, left=130, top=42, word_num=2),
+            token("Fee", 3, left=20, top=100, word_num=1),
+            token("Status", 3, left=80, top=100, word_num=2),
+            token("paid", 4, left=420, top=102, word_num=1),
+        ]
+        extractor = VisibleEvidenceExtractor(
+            ocr_engine=FakeOcrEngine(tokens),
+            cue_detector=NoCueDetector(),
+        )
+
+        candidates = extractor.extract(self.rendered_case())
+
+        self.assertEqual(
+            [(item.field_name, item.value) for item in candidates],
+            [("applicant_name", "Ixodane Luzarn"), ("fee_status", "paid")],
         )
 
     def test_answer_key_context_is_quarantined(self):
