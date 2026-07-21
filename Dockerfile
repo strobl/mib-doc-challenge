@@ -38,7 +38,9 @@ RUN python3 -m pip install \
       mib
 
 COPY run.sh solution.py /app/
+COPY mib_pipeline /app/mib_pipeline
 RUN chmod 0555 /app/run.sh /app/solution.py \
+    && chmod -R a=rX /app/mib_pipeline \
     && chmod 0444 /app/requirements.lock
 
 USER mib:mib

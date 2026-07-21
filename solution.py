@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+from mib_pipeline import BatchRunner, SafeFallbackProcessor, discover_case_pdfs
+
 
 USAGE = "usage: solution.py <input_pdf_dir> <output_predictions_path>"
 MAX_WORKERS = 4
@@ -68,40 +70,24 @@ def parse_paths(argv: Sequence[str]) -> tuple[Path, Path]:
     return input_dir, output_path
 
 
-def discover_case_pdfs(input_dir: Path) -> tuple[Path, ...]:
-    """Enumerate top-level PDF cases deterministically without mutating input."""
-
-    return tuple(
-        sorted(
-            (
-                path
-                for path in input_dir.iterdir()
-                if path.is_file() and path.suffix.casefold() == ".pdf"
-            ),
-            key=lambda path: (path.name.casefold(), path.name),
-        )
-    )
-
-
-def initialize_canonical_output(output_path: Path) -> None:
-    """Create a valid empty JSONL output at the caller-provided mount path."""
-
-    with output_path.open("w", encoding="utf-8", newline="\n"):
-        pass
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the offline scaffold and return a process exit code."""
 
     arguments = sys.argv if argv is None else argv
     try:
         input_dir, output_path = parse_paths(arguments)
-        configured_worker_limit()
-        discover_case_pdfs(input_dir)
-        initialize_canonical_output(output_path)
+        runner = BatchRunner(
+            SafeFallbackProcessor(),
+            max_workers=configured_worker_limit(),
+        )
+        report = runner.run(input_dir, output_path)
     except (ContractError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 64
+    print(
+        f"attempted={report.attempted} answered={report.answered} omitted={report.omitted}",
+        file=sys.stderr,
+    )
     return 0
 
 

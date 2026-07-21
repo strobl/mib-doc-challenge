@@ -7,10 +7,11 @@ implements the evaluator's exact two-argument boundary:
 <input_pdf_dir> <output_predictions_path>
 ```
 
-WO-1 intentionally contains no extraction, linking, or adjudication logic.
-`solution.py` enumerates top-level PDF cases deterministically and initializes a
-valid empty JSONL file. The batch runner and canonical row writer are introduced
-by the downstream work orders.
+Extraction, linking, and policy adjudication are implemented by downstream work
+orders. Until those stages are present, the batch runner answers every case with
+a conservative `NEEDS_REVIEW` fallback row instead of dropping difficult cases.
+The canonical writer emits exactly the twelve submission fields, rejects
+duplicate case IDs, and writes atomically.
 
 ## Build from a clean checkout
 
@@ -67,6 +68,6 @@ python3 -m unittest discover -s tests -v
 ```
 
 When Docker is available, run the image with the full command above. A
-successful WO-1 scaffold run exits with status zero and creates an empty
-`predictions.jsonl`; downstream work orders add one canonical row per answered
-case.
+successful run exits with status zero and creates one canonical fallback row per
+PDF whose filename provides a valid case ID. An empty input directory produces
+an empty `predictions.jsonl`.
