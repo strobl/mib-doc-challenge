@@ -6,6 +6,7 @@ from pathlib import Path
 
 from devtools.ocr_ablation import (
     BASELINE_CONFIG,
+    CHECKBOX_ACTIVITY_COUNTERS,
     AblationConfigurationError,
     AblationVariant,
     build_ablation_processor,
@@ -74,11 +75,22 @@ class FixedProcessor:
         return self._rows[path.stem]
 
 
+class ActivityFixedProcessor(FixedProcessor):
+    def ablation_activity(self):
+        return {
+            "pages_scanned": 2,
+            "complete_groups": 0,
+            "checked_groups": 0,
+            "candidates_added": 0,
+            "ambiguous_groups": 0,
+        }
+
+
 class AblationPlanTests(unittest.TestCase):
     def test_registry_is_stable_and_every_variant_changes_exactly_one_setting(self):
         variants = registered_variants()
 
-        self.assertEqual(len(variants), 10)
+        self.assertEqual(len(variants), 11)
         self.assertEqual(
             len({variant.variant_id for variant in variants}),
             len(variants),
@@ -98,13 +110,22 @@ class AblationPlanTests(unittest.TestCase):
                 key for key in baseline if baseline[key] != candidate[key]
             ]
             self.assertEqual(differences, [variant.changed_variable])
-            self.assertEqual(variant.technique_enabled_in, "baseline")
+            expected_enabled_side = (
+                "variant"
+                if variant.variant_id == "with_checked_fee_option_recovery"
+                else "baseline"
+            )
+            self.assertEqual(
+                variant.technique_enabled_in,
+                expected_enabled_side,
+            )
 
     def test_scope_closure_variants_are_registered_and_buildable(self):
         variant_ids = {variant.variant_id for variant in registered_variants()}
 
         self.assertIn("without_renderer_deskew", variant_ids)
         self.assertIn("without_visible_cue_interpretation", variant_ids)
+        self.assertIn("with_checked_fee_option_recovery", variant_ids)
 
         deskew_processor = build_ablation_processor("without_renderer_deskew")
         deskew_renderer = deskew_processor.processor._renderer
@@ -124,6 +145,19 @@ class AblationPlanTests(unittest.TestCase):
         self.assertIsInstance(
             control.processor._primary_extractor._cues,
             VisualCueDetector,
+        )
+
+        checkbox = build_ablation_processor(
+            "with_checked_fee_option_recovery"
+        )
+        checkbox_extractor = checkbox.processor._primary_extractor
+        self.assertEqual(
+            checkbox_extractor.ablation_activity(),
+            {name: 0 for name in CHECKBOX_ACTIVITY_COUNTERS},
+        )
+        self.assertIs(
+            checkbox_extractor._ocr,
+            checkbox_extractor._delegate._ocr,
         )
 
     def test_two_variable_or_unregistered_change_is_rejected(self):
@@ -182,6 +216,40 @@ class LabelBlindRunTests(unittest.TestCase):
         self.assertNotIn("MIB-000001", serialized)
         self.assertNotIn("truth", serialized.casefold())
 
+    def test_run_records_only_aggregate_route_activity(self):
+        rows = {
+            "MIB-000001": prediction(truth("MIB-000001", "APPROVED")),
+            "MIB-000002": prediction(truth("MIB-000002", "DENIED")),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_dir = root / "input"
+            input_dir.mkdir()
+            for case_id in rows:
+                (input_dir / f"{case_id}.pdf").write_bytes(b"%PDF-fixture")
+            observation = run_variant(
+                variant_id="with_checked_fee_option_recovery",
+                benchmark_id="fixture-v1",
+                source_revision="a" * 40,
+                repeat_index=1,
+                input_dir=input_dir,
+                predictions_path=root / "predictions.jsonl",
+                observation_path=root / "observation.json",
+                max_workers=1,
+                processor_factory=lambda _variant: ActivityFixedProcessor(rows),
+            )
+
+        self.assertEqual(
+            observation["activity_counts"],
+            {
+                "pages_scanned": 2,
+                "complete_groups": 0,
+                "checked_groups": 0,
+                "candidates_added": 0,
+                "ambiguous_groups": 0,
+            },
+        )
+
 
 class AblationReportTests(unittest.TestCase):
     def _fixture(self):
@@ -217,6 +285,7 @@ class AblationReportTests(unittest.TestCase):
         predictions_path,
         cpu,
         config,
+        activity=None,
     ):
         import hashlib
 
@@ -242,6 +311,7 @@ class AblationReportTests(unittest.TestCase):
             "metrics_source": (
                 "fresh_process_rusage_self_plus_waited_children_and_monotonic_wall"
             ),
+            "activity_counts": activity or {},
         }
         path.write_text(json.dumps(value), encoding="utf-8")
         return path
@@ -446,6 +516,93 @@ class AblationReportTests(unittest.TestCase):
 
         self.assertFalse(entry["safety_pass"])
         self.assertFalse(entry["recommendation_eligible"])
+
+    def test_checkbox_activity_is_rendered_and_part_of_determinism(self):
+        stack, root, truth_path, truths = self._fixture()
+        self.addCleanup(stack.cleanup)
+        predictions_path = root / "predictions.jsonl"
+        self._write_predictions(
+            predictions_path,
+            [prediction(truths[0]), prediction(truths[1])],
+        )
+        variant = next(
+            item
+            for item in registered_variants()
+            if item.variant_id == "with_checked_fee_option_recovery"
+        )
+        baseline_paths = [
+            self._observation(
+                root / f"baseline-{repeat}.json",
+                variant_id="baseline",
+                repeat=repeat,
+                predictions_path=predictions_path,
+                cpu=10.0,
+                config=BASELINE_CONFIG,
+            )
+            for repeat in (1, 2)
+        ]
+        activity = {
+            "pages_scanned": 2,
+            "complete_groups": 0,
+            "checked_groups": 0,
+            "candidates_added": 0,
+            "ambiguous_groups": 0,
+        }
+        variant_paths = [
+            self._observation(
+                root / f"variant-{repeat}.json",
+                variant_id=variant.variant_id,
+                repeat=repeat,
+                predictions_path=predictions_path,
+                cpu=10.5,
+                config=variant.config,
+                activity=activity,
+            )
+            for repeat in (1, 2)
+        ]
+        report = build_report(
+            repo_root=REPO_ROOT,
+            truth_path=truth_path,
+            observation_paths=baseline_paths + variant_paths,
+        )
+        markdown = render_markdown(report)
+
+        entry = next(
+            item
+            for item in report["variants"]
+            if item["variant_id"] == variant.variant_id
+        )
+        self.assertTrue(entry["deterministic"])
+        self.assertEqual(entry["enabled_activity_counts"], activity)
+        self.assertIn("`complete_groups=0`", markdown)
+        self.assertNotIn("MIB-000001", markdown)
+
+        changed_activity = dict(activity)
+        changed_activity["pages_scanned"] = 3
+        changed_path = self._observation(
+            root / "variant-2-changed.json",
+            variant_id=variant.variant_id,
+            repeat=2,
+            predictions_path=predictions_path,
+            cpu=10.5,
+            config=variant.config,
+            activity=changed_activity,
+        )
+        changed_report = build_report(
+            repo_root=REPO_ROOT,
+            truth_path=truth_path,
+            observation_paths=baseline_paths + [variant_paths[0], changed_path],
+        )
+        changed_entry = next(
+            item
+            for item in changed_report["variants"]
+            if item["variant_id"] == variant.variant_id
+        )
+        self.assertFalse(changed_entry["deterministic"])
+        self.assertEqual(
+            changed_entry["evidence_status"],
+            "insufficient_evidence",
+        )
 
 
 if __name__ == "__main__":

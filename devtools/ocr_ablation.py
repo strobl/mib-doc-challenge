@@ -24,7 +24,7 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 
 
 SCHEMA_VERSION = "mib_ocr_ablation_v1"
-REPORT_VERSION = "mib_ocr_ablation_report_v1"
+REPORT_VERSION = "mib_ocr_ablation_report_v2"
 MINIMUM_DETERMINISM_REPEATS = 2
 PRIORITY_FIELDS = (
     "risk_flags",
@@ -36,6 +36,15 @@ PRIORITY_FIELDS = (
     "species_code",
     "home_world",
     "declared_purpose",
+)
+CHECKBOX_ACTIVITY_COUNTERS = frozenset(
+    {
+        "pages_scanned",
+        "complete_groups",
+        "checked_groups",
+        "candidates_added",
+        "ambiguous_groups",
+    }
 )
 
 BASELINE_CONFIG: Mapping[str, Mapping[str, bool]] = {
@@ -53,6 +62,9 @@ BASELINE_CONFIG: Mapping[str, Mapping[str, bool]] = {
     "secondary": {
         "rapid_uncertain_fields": True,
     },
+    "candidate": {
+        "checkbox_state_recovery": False,
+    },
 }
 
 _ALLOWED_VARIABLES = frozenset(
@@ -67,6 +79,7 @@ _ALLOWED_VARIABLES = frozenset(
         "primary.renderer_deskew",
         "primary.visible_cue_interpretation",
         "secondary.rapid_uncertain_fields",
+        "candidate.checkbox_state_recovery",
     }
 )
 
@@ -331,6 +344,22 @@ def registered_variants() -> tuple[AblationVariant, ...]:
                 "abstains; unconditional full-page RapidOCR remains out of scope."
             ),
         ),
+        AblationVariant(
+            variant_id="with_checked_fee_option_recovery",
+            family="visible_checkbox_pixels",
+            technique=(
+                "Exact three-option fee group with one pixel-confirmed check "
+                "and two pixel-confirmed empty boxes"
+            ),
+            changed_variable="candidate.checkbox_state_recovery",
+            config=_variant_config("candidate.checkbox_state_recovery", True),
+            target_fields=("fee_status",),
+            technique_enabled_in="variant",
+            hypothesis=(
+                "A fail-closed pixel check should recover a fee state only from "
+                "one complete, aligned, uncorrected option group."
+            ),
+        ),
     )
 
 
@@ -371,12 +400,12 @@ class _VisibleCuesDisabled:
 
 
 def build_ablation_processor(variant_id: str) -> Any:
-    """Build a development processor with one existing recovery technique removed.
+    """Build a processor with exactly one bounded development setting changed.
 
     ``baseline`` delegates to the production composition root.  Every other
-    processor repeats the same composition while changing exactly the one
-    declared OCR setting.  This function is intentionally kept outside
-    ``mib_pipeline`` so it cannot become a submission dependency.
+    processor repeats the same composition while changing one declared OCR
+    setting.  Additive candidates remain under ``devtools`` and cannot become
+    a submission dependency through this harness.
     """
 
     from mib_pipeline import (
@@ -390,6 +419,7 @@ def build_ablation_processor(variant_id: str) -> Any:
         OutputConfidenceRecalibrator,
         RapidOutputRecoveryProcessor,
         ReviewDenialRecoveryAdjudicator,
+        TesseractOcrEngine,
         VisibleEvidenceExtractor,
         build_production_processor,
     )
@@ -426,19 +456,35 @@ def build_ablation_processor(variant_id: str) -> Any:
         if config["primary.visible_cue_interpretation"]
         else _VisibleCuesDisabled()
     )
+    recording_ocr: Any | None = None
+    primary_ocr_arguments: dict[str, Any] = {}
+    if config["candidate.checkbox_state_recovery"]:
+        from devtools.checked_box_candidate import RecordingOcrEngine
+
+        recording_ocr = RecordingOcrEngine(TesseractOcrEngine())
+        primary_ocr_arguments["ocr_engine"] = recording_ocr
+    primary_extractor: Any = VisibleEvidenceExtractor(
+        cue_detector=cue_detector,
+        packet_page_type_markers=True,
+        psm6_refinement=config["primary.psm6_refinement"],
+        consensus_retry=config["primary.cross_view_consensus"],
+        fee_receipt_retry=config["primary.fee_threshold_consensus"],
+        sparse_intake_retry=config["primary.sparse_intake_crop_consensus"],
+        orientation_retry=config["primary.orientation_retry"],
+        trusted_scope_repair=config["primary.trusted_scope_repair"],
+        risk_flag_retry=config["primary.risk_geometry_retry"],
+        **primary_ocr_arguments,
+    )
+    if recording_ocr is not None:
+        from devtools.checked_box_candidate import CheckedFeeOptionExtractor
+
+        primary_extractor = CheckedFeeOptionExtractor(
+            delegate=primary_extractor,
+            recording_ocr=recording_ocr,
+        )
     processor = RapidOutputRecoveryProcessor(
         renderer=renderer,
-        primary_extractor=VisibleEvidenceExtractor(
-            cue_detector=cue_detector,
-            packet_page_type_markers=True,
-            psm6_refinement=config["primary.psm6_refinement"],
-            consensus_retry=config["primary.cross_view_consensus"],
-            fee_receipt_retry=config["primary.fee_threshold_consensus"],
-            sparse_intake_retry=config["primary.sparse_intake_crop_consensus"],
-            orientation_retry=config["primary.orientation_retry"],
-            trusted_scope_repair=config["primary.trusted_scope_repair"],
-            risk_flag_retry=config["primary.risk_geometry_retry"],
-        ),
+        primary_extractor=primary_extractor,
         linker=CaseLinker(),
         resolver=EvidencePrecedenceResolver(),
         adjudicator=ReviewDenialRecoveryAdjudicator(
@@ -453,6 +499,43 @@ def build_ablation_processor(variant_id: str) -> Any:
         processor=processor,
         recalibrator=OutputConfidenceRecalibrator.from_pinned_artifact(),
     )
+
+
+def _collect_ablation_activity(processor: Any) -> dict[str, int]:
+    """Find one development component's aggregate counters without case data."""
+
+    pending = [processor]
+    visited: set[int] = set()
+    while pending:
+        component = pending.pop()
+        identity = id(component)
+        if identity in visited:
+            continue
+        visited.add(identity)
+        activity_method = getattr(component, "ablation_activity", None)
+        if callable(activity_method):
+            activity = activity_method()
+            if not isinstance(activity, Mapping):
+                raise RuntimeError("ablation activity must be a mapping")
+            normalized: dict[str, int] = {}
+            for name, value in activity.items():
+                if (
+                    not isinstance(name, str)
+                    or not name
+                    or isinstance(value, bool)
+                    or not isinstance(value, int)
+                    or value < 0
+                ):
+                    raise RuntimeError(
+                        "ablation activity requires names and non-negative integers"
+                    )
+                normalized[name] = value
+            return normalized
+        for attribute in ("processor", "_processor", "_primary_extractor"):
+            child = getattr(component, attribute, None)
+            if child is not None:
+                pending.append(child)
+    return {}
 
 
 def _sha256_file(path: Path) -> str:
@@ -561,8 +644,9 @@ def run_variant(
 
     cpu_before = _cpu_seconds()
     wall_before = time.monotonic()
+    processor = processor_factory(variant_id)
     batch = BatchRunner(
-        processor_factory(variant_id),
+        processor,
         max_workers=max_workers,
     ).run(input_dir, predictions_path)
     wall_seconds = time.monotonic() - wall_before
@@ -591,6 +675,7 @@ def run_variant(
             "fresh_process_rusage_self_plus_waited_children_and_monotonic_wall"
         ),
         "tool_versions": _tool_versions(),
+        "activity_counts": _collect_ablation_activity(processor),
     }
     observation_path.write_text(
         json.dumps(observation, indent=2, sort_keys=True) + "\n",
@@ -652,6 +737,29 @@ def _validate_observation(path: Path, value: Any) -> dict[str, Any]:
             or float(value_number) <= 0.0
         ):
             raise AblationConfigurationError(f"{path}: {key} must be positive")
+    activity_counts = value.get("activity_counts", {})
+    if not isinstance(activity_counts, dict):
+        raise AblationConfigurationError(
+            f"{path}: activity_counts must be a mapping"
+        )
+    for name, count in activity_counts.items():
+        if (
+            not isinstance(name, str)
+            or not name
+            or isinstance(count, bool)
+            or not isinstance(count, int)
+            or count < 0
+        ):
+            raise AblationConfigurationError(
+                f"{path}: activity counters require names and non-negative integers"
+            )
+    if (
+        str(value["variant_id"]) == "with_checked_fee_option_recovery"
+        and set(activity_counts) != set(CHECKBOX_ACTIVITY_COUNTERS)
+    ):
+        raise AblationConfigurationError(
+            f"{path}: checkbox observation requires the fixed activity counters"
+        )
     return dict(value)
 
 
@@ -812,6 +920,17 @@ def build_report(
             and len({item["predictions_sha256"] for item in observations}) == 1
             and len(
                 {
+                    json.dumps(
+                        item.get("activity_counts", {}),
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    for item in observations
+                }
+            )
+            == 1
+            and len(
+                {
                     json.dumps(aggregate, sort_keys=True)
                     for aggregate in aggregates
                 }
@@ -843,6 +962,7 @@ def build_report(
             "peak_memory_mib_max": max(
                 float(item.get("peak_memory_mib", 0.0)) for item in observations
             ),
+            "activity_counts": dict(observations[0].get("activity_counts", {})),
         }
 
     baseline = scored["baseline"]
@@ -934,6 +1054,8 @@ def build_report(
                 "enabled_catastrophic_false_approvals": enabled_catastrophic,
                 "disabled_catastrophic_false_approvals": disabled_catastrophic,
                 "target_field_raw_point_deltas": field_deltas,
+                "enabled_activity_counts": enabled["activity_counts"],
+                "disabled_activity_counts": disabled["activity_counts"],
                 "recommendation_eligible": eligible,
             }
         )
@@ -1142,6 +1264,29 @@ def render_markdown(report: Mapping[str, Any]) -> str:
                 ),
             )
         )
+    activity_entries = [
+        entry
+        for entry in report.get("variants", [])
+        if entry.get("enabled_activity_counts")
+    ]
+    if activity_entries:
+        lines.extend(
+            [
+                "",
+                "## Aggregate route activity",
+                "",
+                "| Variant | Technique-enabled activity counters |",
+                "|---|---|",
+            ]
+        )
+        for entry in activity_entries:
+            counters = ", ".join(
+                f"`{name}={count}`"
+                for name, count in sorted(
+                    entry["enabled_activity_counts"].items()
+                )
+            )
+            lines.append(f"| `{entry['variant_id']}` | {counters} |")
     lines.extend(
         [
             "",

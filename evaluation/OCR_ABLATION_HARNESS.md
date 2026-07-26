@@ -33,6 +33,10 @@ RapidOCR routed only to unresolved output fields. Two additional removal
 ablations independently measure bounded render-time deskew and the combined
 visible stamp/correction/watermark/strikethrough cue path. Their target fields
 match the Work Order's priority fields.
+Visible checkbox pixels are intentionally separate from that combined cue
+path. The additive `with_checked_fee_option_recovery` variant measures only a
+complete, aligned three-option fee group with one pixel-confirmed check and
+two pixel-confirmed empty boxes; every incomplete or ambiguous group abstains.
 
 ## Reproducible commands
 
@@ -86,14 +90,18 @@ variants. It intentionally contains no per-case identifiers.
 
 ## Current evidence state
 
-The first bounded public diagnostic is recorded in
-[`OCR_ABLATION_REPORT_BOUNDED_V1.md`](OCR_ABLATION_REPORT_BOUNDED_V1.md) and
-its compact aggregate JSON companion. All eight variants and the baseline
-have two byte-identical, complete repetitions. Targeted RapidOCR is the
-measured first implementation-review choice, fee-row consensus is second, and
-orientation retry is rejected as a winner on this cohort. The report is
-explicitly public, label-exposed diagnostic evidence; WO-15 still owns
-group-exclusive robustness and production-promotion gates.
-That report does not isolate renderer deskew or the combined visible
-status-cue path. The harness now registers both routes for a clean V2
-measurement; WO-14 remains in progress until those results are recorded.
+The ten-route V2 bounded public diagnostic is recorded in
+[`OCR_ABLATION_REPORT_BOUNDED_V2.md`](OCR_ABLATION_REPORT_BOUNDED_V2.md) and
+its compact aggregate JSON companion. All ten variants and the baseline have
+two byte-identical, complete repetitions. Targeted RapidOCR is the measured
+first implementation-review choice, bounded renderer deskew is second,
+fee-row consensus is third, and orientation retry is rejected as a winner on
+this cohort. The stamp/correction/watermark/strikethrough cue path is
+independently measured at zero final-output delta on this cohort; it does not
+include checkbox pixels.
+
+The V1 report remains immutable historical evidence. V2 closes the deskew and
+non-checkbox cue gaps, but visible checkbox pixels remain outstanding until
+the separate additive variant has two deterministic measurements. WO-15 still
+owns group-exclusive robustness, complete recovery provenance, and
+production-promotion gates.
