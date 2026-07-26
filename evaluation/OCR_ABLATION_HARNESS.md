@@ -29,8 +29,10 @@ private, or official leaderboard score.
 The built-in removal ablations cover selective PSM 6, cross-view consensus,
 the normalized fee threshold crop, the normalized sparse-intake crop,
 orientation retry, visible applicant-scope repair, risk-row geometry, and
-RapidOCR routed only to unresolved output fields. Their target fields match
-the Work Order's priority fields.
+RapidOCR routed only to unresolved output fields. Two additional removal
+ablations independently measure bounded render-time deskew and the combined
+visible stamp/correction/watermark/strikethrough cue path. Their target fields
+match the Work Order's priority fields.
 
 ## Reproducible commands
 
@@ -84,7 +86,7 @@ variants. It intentionally contains no per-case identifiers.
 
 ## Current evidence state
 
-The bounded public diagnostic is recorded in
+The first bounded public diagnostic is recorded in
 [`OCR_ABLATION_REPORT_BOUNDED_V1.md`](OCR_ABLATION_REPORT_BOUNDED_V1.md) and
 its compact aggregate JSON companion. All eight variants and the baseline
 have two byte-identical, complete repetitions. Targeted RapidOCR is the
@@ -92,6 +94,6 @@ measured first implementation-review choice, fee-row consensus is second, and
 orientation retry is rejected as a winner on this cohort. The report is
 explicitly public, label-exposed diagnostic evidence; WO-15 still owns
 group-exclusive robustness and production-promotion gates.
-The first report does not yet isolate renderer deskew or the combined visible
-status-cue path, so WO-14 remains in progress until those two bounded
-one-variable measurements are added.
+That report does not isolate renderer deskew or the combined visible
+status-cue path. The harness now registers both routes for a clean V2
+measurement; WO-14 remains in progress until those results are recorded.

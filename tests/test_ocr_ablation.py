@@ -8,6 +8,7 @@ from devtools.ocr_ablation import (
     BASELINE_CONFIG,
     AblationConfigurationError,
     AblationVariant,
+    build_ablation_processor,
     build_report,
     config_sha256,
     registered_variants,
@@ -72,7 +73,7 @@ class AblationPlanTests(unittest.TestCase):
     def test_registry_is_stable_and_every_variant_changes_exactly_one_setting(self):
         variants = registered_variants()
 
-        self.assertEqual(len(variants), 8)
+        self.assertEqual(len(variants), 10)
         self.assertEqual(
             len({variant.variant_id for variant in variants}),
             len(variants),
@@ -93,6 +94,16 @@ class AblationPlanTests(unittest.TestCase):
             ]
             self.assertEqual(differences, [variant.changed_variable])
             self.assertEqual(variant.technique_enabled_in, "baseline")
+
+    def test_scope_closure_variants_are_registered_and_buildable(self):
+        variant_ids = {variant.variant_id for variant in registered_variants()}
+
+        for variant_id in (
+            "without_renderer_deskew",
+            "without_visible_cue_interpretation",
+        ):
+            self.assertIn(variant_id, variant_ids)
+            self.assertIsNotNone(build_ablation_processor(variant_id))
 
     def test_two_variable_or_unregistered_change_is_rejected(self):
         changed = {

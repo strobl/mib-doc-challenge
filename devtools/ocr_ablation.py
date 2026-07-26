@@ -47,6 +47,8 @@ BASELINE_CONFIG: Mapping[str, Mapping[str, bool]] = {
         "orientation_retry": True,
         "trusted_scope_repair": True,
         "risk_geometry_retry": True,
+        "renderer_deskew": True,
+        "visible_cue_interpretation": True,
     },
     "secondary": {
         "rapid_uncertain_fields": True,
@@ -62,6 +64,8 @@ _ALLOWED_VARIABLES = frozenset(
         "primary.orientation_retry",
         "primary.trusted_scope_repair",
         "primary.risk_geometry_retry",
+        "primary.renderer_deskew",
+        "primary.visible_cue_interpretation",
         "secondary.rapid_uncertain_fields",
     }
 )
@@ -289,6 +293,33 @@ def registered_variants() -> tuple[AblationVariant, ...]:
             ),
         ),
         AblationVariant(
+            variant_id="without_renderer_deskew",
+            family="bounded_deskew",
+            technique="Bounded render-time deskew over plus or minus three degrees",
+            changed_variable="primary.renderer_deskew",
+            config=_variant_config("primary.renderer_deskew", False),
+            target_fields=PRIORITY_FIELDS,
+            hypothesis=(
+                "Bounded render-time deskew should recover OCR evidence on "
+                "slightly rotated pages without changing render resolution."
+            ),
+        ),
+        AblationVariant(
+            variant_id="without_visible_cue_interpretation",
+            family="visible_status_cues",
+            technique=(
+                "Visible stamp, correction, watermark, and strikethrough "
+                "interpretation"
+            ),
+            changed_variable="primary.visible_cue_interpretation",
+            config=_variant_config("primary.visible_cue_interpretation", False),
+            target_fields=PRIORITY_FIELDS,
+            hypothesis=(
+                "Visible status cues should prevent superseded or decorative "
+                "readings from entering evidence resolution."
+            ),
+        ),
+        AblationVariant(
             variant_id="without_targeted_rapidocr",
             family="secondary_ocr",
             technique="RapidOCR routed only to unresolved output fields",
@@ -324,6 +355,19 @@ def config_sha256(config: Mapping[str, Mapping[str, bool]]) -> str:
 
 def _disabled_rapid_extractor() -> Any:
     raise RuntimeError("RapidOCR disabled by development ablation")
+
+
+class _VisibleCuesDisabled:
+    """Return no visible cues while preserving the extractor interface."""
+
+    @staticmethod
+    def prepare_page(grayscale: Any) -> Any:
+        return grayscale
+
+    @staticmethod
+    def cues_for_line(line: Any, page_pixels: Any) -> tuple[str, ...]:
+        del line, page_pixels
+        return ()
 
 
 def build_ablation_processor(variant_id: str) -> Any:
@@ -362,9 +406,30 @@ def build_ablation_processor(variant_id: str) -> Any:
     rapid_arguments: dict[str, Any] = {}
     if rapid_factory is not None:
         rapid_arguments["rapid_extractor_factory"] = rapid_factory
+    renderer: Any
+    if config["primary.renderer_deskew"]:
+        renderer = DocumentRenderer()
+    else:
+        class DeskewDisabledDocumentRenderer(DocumentRenderer):
+            @staticmethod
+            def _estimate_skew(
+                image: Any,
+                image_module: Any,
+                numpy_module: Any,
+            ) -> float:
+                del image, image_module, numpy_module
+                return 0.0
+
+        renderer = DeskewDisabledDocumentRenderer()
+    cue_detector = (
+        None
+        if config["primary.visible_cue_interpretation"]
+        else _VisibleCuesDisabled()
+    )
     processor = RapidOutputRecoveryProcessor(
-        renderer=DocumentRenderer(),
+        renderer=renderer,
         primary_extractor=VisibleEvidenceExtractor(
+            cue_detector=cue_detector,
             packet_page_type_markers=True,
             psm6_refinement=config["primary.psm6_refinement"],
             consensus_retry=config["primary.cross_view_consensus"],
