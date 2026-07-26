@@ -84,8 +84,14 @@ variants. It intentionally contains no per-case identifiers.
 
 ## Current evidence state
 
-The harness and its tests are committed separately from expensive corpus
-runs. Until fresh repetitions are supplied, every candidate remains
-`not_measured` and no recovery implementation recommendation is justified.
-Historical exploratory timings are useful for prioritization but are not
-silently promoted into this reproducible report.
+The bounded public diagnostic is recorded in
+[`OCR_ABLATION_REPORT_BOUNDED_V1.md`](OCR_ABLATION_REPORT_BOUNDED_V1.md) and
+its compact aggregate JSON companion. All eight variants and the baseline
+have two byte-identical, complete repetitions. Targeted RapidOCR is the
+measured first implementation-review choice, fee-row consensus is second, and
+orientation retry is rejected as a winner on this cohort. The report is
+explicitly public, label-exposed diagnostic evidence; WO-15 still owns
+group-exclusive robustness and production-promotion gates.
+The first report does not yet isolate renderer deskew or the combined visible
+status-cue path, so WO-14 remains in progress until those two bounded
+one-variable measurements are added.
