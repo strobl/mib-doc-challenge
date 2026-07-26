@@ -15,7 +15,12 @@ from devtools.ocr_ablation import (
     render_markdown,
     run_variant,
 )
-from mib_pipeline import PredictionRow, build_production_processor
+from mib_pipeline import (
+    DocumentRenderer,
+    PredictionRow,
+    VisualCueDetector,
+    build_production_processor,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -98,12 +103,28 @@ class AblationPlanTests(unittest.TestCase):
     def test_scope_closure_variants_are_registered_and_buildable(self):
         variant_ids = {variant.variant_id for variant in registered_variants()}
 
-        for variant_id in (
-            "without_renderer_deskew",
-            "without_visible_cue_interpretation",
-        ):
-            self.assertIn(variant_id, variant_ids)
-            self.assertIsNotNone(build_ablation_processor(variant_id))
+        self.assertIn("without_renderer_deskew", variant_ids)
+        self.assertIn("without_visible_cue_interpretation", variant_ids)
+
+        deskew_processor = build_ablation_processor("without_renderer_deskew")
+        deskew_renderer = deskew_processor.processor._renderer
+        self.assertEqual(
+            deskew_renderer._estimate_skew(None, None, None),
+            0.0,
+        )
+
+        cue_processor = build_ablation_processor(
+            "without_visible_cue_interpretation"
+        )
+        cue_detector = cue_processor.processor._primary_extractor._cues
+        self.assertEqual(cue_detector.cues_for_line(None, None), ())
+
+        control = build_ablation_processor("without_orientation_retry")
+        self.assertIs(type(control.processor._renderer), DocumentRenderer)
+        self.assertIsInstance(
+            control.processor._primary_extractor._cues,
+            VisualCueDetector,
+        )
 
     def test_two_variable_or_unregistered_change_is_rejected(self):
         changed = {
